@@ -1,0 +1,41 @@
+name: Cloud Build
+
+on:
+  push:
+
+
+jobs:
+  build:
+    name: Build ${{ matrix.arch }}-${{ matrix.sdk }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch:
+          - x86_64
+        sdk:
+          - openwrt-24.10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build
+        uses: openwrt/gh-action-sdk@main
+        env:
+          ARCH: ${{ matrix.arch }}-${{ matrix.sdk }}
+          FEEDNAME: passwall_packages
+          PACKAGES: luci-app-passwall
+          NO_REFRESH_CHECK: true
+          PACKAGES_FEED: https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git
+          PACKAGES_BRANCH: main
+          PACKAGES_PATH: package/ passwall
+
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ matrix.arch }}-${{ matrix.sdk }}
+          path: bin/packages/${{ matrix.arch }}/passwall_packages/*.ipk
