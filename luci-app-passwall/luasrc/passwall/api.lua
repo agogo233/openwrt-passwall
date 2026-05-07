@@ -945,6 +945,28 @@ function parseURL(url_str)
 	return res
 end
 
+function parseDoH(doh_str)
+	doh_str = trim(doh_str)
+	if doh_str == "" then return nil end
+
+	local url_part, ip_part
+	if doh_str:find(",", 1, true) then
+		url_part, ip_part = doh_str:match("^([^,]+),(.+)$")
+	else
+		url_part = doh_str
+	end
+
+	local res = parseURL(url_part)
+	if not res then return nil end
+
+	res.url = url_part
+	if ip_part and ip_part ~= "" and is_ip(ip_part) then
+		res.hostip = ip_part
+	end
+
+	return res
+end
+
 local default_file_tree = {
 	x86_64  = "amd64",
 	x86     = "386",
@@ -1554,4 +1576,18 @@ function fetch_cert_sha256(host, port, timeout)
 	local fp = out:match("^([0-9a-fA-F]+)")
 	if not fp then return "" end
 	return fp:upper()
+end
+
+function vps_domain_exclude(domain)
+	if trim(domain) == "" then return true end
+	local map = {
+		["engage.cloudflareclient.com"] = 1,
+		["google.com"] = 1, ["www.google.com"] = 1,
+		["youtube.com"] = 1, ["www.youtube.com"] = 1,
+		["github.com"] = 1, ["telegram.org"] = 1,
+		["cloudflare.com"] = 1, ["www.cloudflare.com"] = 1,
+		["bing.com"] = 1, ["www.bing.com"] = 1, ["x.com"] = 1
+	}
+	if map[domain] then return true end
+	return false
 end

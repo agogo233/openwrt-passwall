@@ -795,6 +795,8 @@ filter_direct_node_list() {
 update_wan_sets() {
 	local log=$1
 
+	[ -z "$(command -v get_wan_ips)" ] && . "$UTILS_PATH"
+
 	local WAN_IP=$(get_wan_ips ip4)
 	[ -n "$WAN_IP" ] && {
 		ipset -F "$IPSET_WAN"
@@ -939,13 +941,8 @@ add_firewall_rule() {
 		fi
 	}
 	
-	ipset -! -R <<-EOF
-		$(ip address show | grep -w "inet" | awk '{print $2}' | awk -F '/' '{print $1}' | sed -e "s/^/add $IPSET_LOCAL /")
-	EOF
-
-	ipset -! -R <<-EOF
-		$(ip address show | grep -w "inet6" | awk '{print $2}' | awk -F '/' '{print $1}' | sed -e "s/^/add $IPSET_LOCAL6 /")
-	EOF
+	get_local_ips ip4 | sed "s/^/add $IPSET_LOCAL /" | ipset -! -R
+	get_local_ips ip6 | sed "s/^/add $IPSET_LOCAL6 /" | ipset -! -R
 
 	#局域网IP列表
 	ipset -! -R <<-EOF
@@ -1023,9 +1020,9 @@ add_firewall_rule() {
 	$ipt_n -N PSW_DNS
 	if [ $(config_t_get global dns_redirect "1") = "0" ]; then
 		#Only hijack when dest address is local IP
-		$ipt_n -I PREROUTING $(dst $IPSET_LOCAL) -j PSW_DNS
+		$ipt_n -I PREROUTING -m set --match-set $IPSET_LAN src $(dst $IPSET_LOCAL) -j PSW_DNS
 	else
-		$ipt_n -I PREROUTING 1 -j PSW_DNS
+		$ipt_n -I PREROUTING -m set --match-set $IPSET_LAN src -j PSW_DNS
 	fi
 
 	$ipt_m -N PSW_DIVERT
@@ -1094,9 +1091,9 @@ add_firewall_rule() {
 	$ip6t_n -N PSW_DNS
 	if [ $(config_t_get global dns_redirect "1") = "0" ]; then
 		#Only hijack when dest address is local IP
-		$ip6t_n -I PREROUTING $(dst $IPSET_LOCAL6) -j PSW_DNS
+		$ip6t_n -I PREROUTING -m set --match-set $IPSET_LAN6 src $(dst $IPSET_LOCAL6) -j PSW_DNS
 	else
-		$ip6t_n -I PREROUTING 1 -j PSW_DNS
+		$ip6t_n -I PREROUTING -m set --match-set $IPSET_LAN6 src -j PSW_DNS
 	fi
 
 	$ip6t_m -N PSW_DIVERT
@@ -1492,7 +1489,7 @@ start() {
 }
 
 stop() {
-	[ -z "$(command -v echolog)" ] && . /usr/share/passwall/utils.sh
+	[ -z "$(command -v echolog)" ] && . "$UTILS_PATH"
 	del_firewall_rule
 	[ $(config_t_get global flush_set_on_reboot "0") = "1" -o $(config_t_get global flush_set "0") = "1" ] && {
 		uci -q delete ${CONFIG}.@global[0].flush_set
