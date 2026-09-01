@@ -40,12 +40,6 @@ config_n_get() {
 	echo "${ret:=$3}"
 }
 
-config_t_get() {
-	local index=${4:-0}
-	local ret=$(uci -q get "${CONFIG}.@${1}[${index}].${2}" 2>/dev/null)
-	echo "${ret:=${3}}"
-}
-
 config_t_set() {
 	local index=${4:-0}
 	local ret=$(uci -q set "${CONFIG}.@${1}[${index}].${2}=${3}" 2>/dev/null)
@@ -70,9 +64,9 @@ get_geoip() {
 	local geoip_type_flag=""
 	local output_path="${geo_output_path}/geoip-${geoip_code}-$2"
 	[ ! -s "${output_path}" ] && {
-		local geoip_path="$(config_t_get global_rules v2ray_location_asset)"
+		local geoip_path="$(config_n_get @global_rules[0] v2ray_location_asset)"
 		geoip_path="${geoip_path%*/}/geoip.dat"
-		local bin="$(first_type $(config_t_get global_app geoview_file) geoview)"
+		local bin="$(first_type $(config_n_get @global_app[0] geoview_file) geoview)"
 		[ -n "$bin" ] && [ -s "$geoip_path" ] || { echo ""; return; }
 		case "$2" in
 			"ipv4") geoip_type_flag="-ipv6=false" ;;
@@ -89,7 +83,7 @@ get_host_ip() {
 	[ -z "$count" ] && count=3
 	local isip=""
 	local ip=""
-	if [ "$1" == "ipv6" ]; then
+	if [ "$1" = "ipv6" ]; then
 		isip=$(echo $host | grep -E "([A-Fa-f0-9]{1,4}::?){1,7}[A-Fa-f0-9]{1,4}")
 		if [ -n "$isip" ]; then
 			ip=$(echo "$host" | tr -d '[]')
@@ -100,7 +94,7 @@ get_host_ip() {
 	fi
 	[ -z "$isip" ] && {
 		local t=4
-		[ "$1" == "ipv6" ] && t=6
+		[ "$1" = "ipv6" ] && t=6
 		local vpsrip=$(resolveip -$t -t $count $host | awk 'NR==1{print}')
 		ip=$vpsrip
 	}
@@ -113,7 +107,7 @@ get_node_host_ip() {
 	[ -n "$address" ] && {
 		local use_ipv6=$(config_n_get $1 use_ipv6)
 		local network_type="ipv4"
-		[ "$use_ipv6" == "1" ] && network_type="ipv6"
+		[ "$use_ipv6" = "1" ] && network_type="ipv6"
 		ip=$(get_host_ip $network_type $address)
 	}
 	echo $ip
@@ -220,7 +214,7 @@ get_first_dns() {
 		echo "${2}#${3}"
 		return 1
 	}
-	eval "hosts_foreach \"${__hosts_val}\" __first \"$@\""
+	hosts_foreach "${__hosts_val}" __first "$@"
 }
 
 get_last_dns() {
@@ -231,8 +225,8 @@ get_last_dns() {
 		__last="${2}#${3}"
 		__first=${__first:-${__last}}
 	}
-	eval "hosts_foreach \"${__hosts_val}\" __every \"$@\""
-	[ "${__first}" ==  "${__last}" ] || echo "${__last}"
+	hosts_foreach "${__hosts_val}" __first "$@"
+	[ "${__first}" =  "${__last}" ] || echo "${__last}"
 }
 
 normalize_dns() {
@@ -319,7 +313,7 @@ get_new_port() {
 			fi
 		fi
 	fi
-	[ "$port" -lt $min_port -o "$port" -gt $max_port ] && port=$default_start_port
+	[ "$port" -lt $min_port ] || [ "$port" -gt $max_port ] && port=$default_start_port
 	local start_port="$port"
 	while :; do
 		if [ "$(check_port_exists "$port" "$protocol")" = 0 ]; then
@@ -346,9 +340,11 @@ check_ver() {
 	local version1="$1"
 	local version2="$2"
 	local i v1 v1_1 v1_2 v1_3 v2 v2_1 v2_2 v2_3
-	IFS='.'; set -- $version1; v1_1=${1:-0}; v1_2=${2:-0}; v1_3=${3:-0}
-	IFS='.'; set -- $version2; v2_1=${1:-0}; v2_2=${2:-0}; v2_3=${3:-0}
-	IFS=
+	local old_ifs="$IFS"
+	IFS='.'
+	set -- $version1; v1_1=${1:-0}; v1_2=${2:-0}; v1_3=${3:-0}
+	set -- $version2; v2_1=${1:-0}; v2_2=${2:-0}; v2_3=${3:-0}
+	IFS="$old_ifs"
 	for i in 1 2 3; do
 		eval v1=\$v1_$i
 		eval v2=\$v2_$i
@@ -473,39 +469,33 @@ ln_run() {
 		[ -x "${file_func}" ] || echolog "  - $(readlink ${file_func}) 没有执行权限，无法启动：${file_func} $*"
 	fi
 	#echo "${file_func} $*" >&2
-	[ -n "${file_func}" ] || echolog "  - 找不到 ${ln_name}，无法启动..."
-	[ "${output}" != "/dev/null" ] && [ "${ln_name}" != "chinadns-ng" ] && {
-		local persist_log_path=$(config_t_get global persist_log_path)
-		local sys_log=$(config_t_get global sys_log "0")
+	[ -n "${file_func}" ] || {
+		echolog "  - 找不到 ${ln_name}，无法启动..."
+		return 1
+	}
+	[ "${output}" != "/dev/null" ] && [ -n "$(echo "${output}" | grep -E "default|socks_")" ] && [ "${ln_name}" != "chinadns-ng" ] && {
+		local persist_log_path=$(config_n_get @global[0] persist_log_path)
+		local sys_log=$(config_n_get @global[0] sys_log "0")
 	}
 	if [ -z "$persist_log_path" ] && [ "$sys_log" != "1" ]; then
 		${file_func:-echolog " - ${ln_name}"} "$@" >${output} 2>&1 &
 	else
-		[ "${output: -1, -7}" == "TCP.log" ] && local protocol="TCP"
-		[ "${output: -1, -7}" == "UDP.log" ] && local protocol="UDP"
 		if [ -n "${persist_log_path}" ]; then
 			mkdir -p ${persist_log_path}
-			local log_file=${persist_log_path}/passwall_${protocol}_${ln_name}_$(date '+%F').log
+			local log_file=${persist_log_path}/passwall_global_${ln_name}_$(date '+%F').log
 			echolog "记录到持久性日志文件：${log_file}"
 			${file_func:-echolog " - ${ln_name}"} "$@" >> ${log_file} 2>&1 &
 			sys_log=0
 		fi
-		if [ "${sys_log}" == "1" ]; then
-			echolog "记录 ${ln_name}_${protocol} 到系统日志"
-			${file_func:-echolog " - ${ln_name}"} "$@" 2>&1 | logger -t PASSWALL_${protocol}_${ln_name} &
+		if [ "${sys_log}" = "1" ]; then
+			echolog "记录 ${ln_name}_global 到系统日志"
+			${file_func:-echolog " - ${ln_name}"} "$@" 2>&1 | logger -t PASSWALL_global_${ln_name} &
 		fi
 	fi
 	[ "$NO_REC_PROCESS" = "1" ] && return
 	process_count=$(ls $TMP_SCRIPT_FUNC_PATH | wc -l)
 	process_count=$((process_count + 1))
 	echo "${file_func:-echolog "  - ${ln_name}"} $@ >${output}" > $TMP_SCRIPT_FUNC_PATH/$process_count
-}
-
-is_socks_wrap() {
-	case "$1" in
-		Socks_*) return 0 ;;
-		*)       return 1 ;;
-	esac
 }
 
 kill_all() {

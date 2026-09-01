@@ -7,6 +7,8 @@ local urlencode = api.UrlEncode
 local base64 = api.base64Encode
 local json = api.jsonc
 
+local domain_redir = {}
+
 local function host_format(host)
 	if not host then return "" end
 	local str = host:match("%[(.-)%]") or host
@@ -162,7 +164,7 @@ local function build_common(node)
 				local d = opts["download-settings"]
 				local ds = {}
 
-				if d.server then ds.address = d.server end
+				if d.server then ds.address = domain_redir[d.server] or d.server end
 				if d.port then ds.port = d.port end
 
 				ds.network = "xhttp"
@@ -218,7 +220,7 @@ local function encode_vless(node)
 	local link = "vless://" .. node.uuid .. "@" .. o.server .. ":" .. o.port
 	local p = {}
 
-	if node.flow then table.insert(p, "flow=" .. urlencode(node.flow)) end
+	if type(node.flow) == "string" and node.flow:sub(1, 5) == "xtls-" then table.insert(p, "flow=" .. urlencode(node.flow)) end
 	if node.encryption then table.insert(p, "encryption=" .. urlencode(node.encryption)) end
 
 	-- TLS
@@ -244,7 +246,7 @@ local function encode_vless(node)
 		link = link .. "?" .. table.concat(p, "&")
 	end
 
-	return link .. "#" .. urlencode(o.name or "")
+	return 0, link .. "#" .. urlencode(o.name or "")
 end
 
 -- Trojan
@@ -273,7 +275,7 @@ local function encode_trojan(node)
 		link = link .. "?" .. table.concat(p, "&")
 	end
 
-	return link .. "#" .. urlencode(o.name or "")
+	return 0, link .. "#" .. urlencode(o.name or "")
 end
 
 -- VMess
@@ -307,11 +309,19 @@ local function encode_vmess(node)
 		obj.path = o.transport.serviceName or ""
 	end
 
-	return "vmess://" .. base64(json.stringify(obj))
+	return 0, "vmess://" .. base64(json.stringify(obj))
 end
 
 -- SS
 local function encode_ss(node)
+	local ss_method = {
+		["none"]=1, ["aes-128-gcm"]=1, ["aes-192-gcm"]=1, ["aes-256-gcm"]=1, ["chacha20-ietf-poly1305"]=1, ["xchacha20-ietf-poly1305"]=1, ["2022-blake3-aes-128-gcm"]=1, ["2022-blake3-aes-256-gcm"]=1, ["2022-blake3-chacha20-poly1305"]=1,
+		["aes-128-ctr"]=1, ["aes-192-ctr"]=1, ["aes-256-ctr"]=1, ["aes-128-cfb"]=1, ["aes-192-cfb"]=1, ["aes-256-cfb"]=1, ["rc4-md5"]=1, ["chacha20-ietf"]=1, ["xchacha20"]=1,
+	}
+	if not ss_method[node.cipher or ""] then
+		return 1, "订阅转换 → 丢弃 SS 节点：" .. (node.name or "") .. "，因 Core 不支持 " .. (node.cipher or "") .. " 加密方式"
+	end
+
 	local userinfo = node.cipher .. ":" .. node.password
 	local base = userinfo .. "@" .. host_format(node.server) .. ":" .. node.port
 	local link = "ss://" .. base64(base)
@@ -326,7 +336,7 @@ local function encode_ss(node)
 		if plugin == "shadow-tls" then
 			local shadow_tls = base64(json.stringify(node["plugin-opts"] or {}))
 			table.insert(p, "shadow-tls=" .. urlencode(shadow_tls))
-		else
+		elseif plugin == "obfs-local" or plugin == "v2ray-plugin" then
 			local opts = {}
 			for k, v in pairs(node["plugin-opts"] or {}) do
 				if plugin == "obfs-local" then
@@ -341,10 +351,6 @@ local function encode_ss(node)
 						end
 						v = nil
 					end
-				elseif plugin == "gost-plugin" then
-					if k == "mode" and v == "websocket" then v = "ws" end
-					if k == "host" then k = "serverName" end
-					if k == "headers" then v = nil end
 				end
 				if v ~= nil then
 					if type(v) == "boolean" then
@@ -355,6 +361,8 @@ local function encode_ss(node)
 			end
 			if #opts > 0 then plugin = plugin .. ";" .. table.concat(opts, ";") end
 			table.insert(p, "plugin=" .. urlencode(plugin))
+		else
+			return 1, "订阅转换 → 丢弃 SS 节点：" .. (node.name or "") .. "，因 Core 不支持 " .. plugin .. " 插件"
 		end
 	end
 
@@ -362,7 +370,7 @@ local function encode_ss(node)
 		link = link .. "?" .. table.concat(p, "&")
 	end
 
-	return link .. "#" .. urlencode(node.name or "")
+	return 0, link .. "#" .. urlencode(node.name or "")
 end
 
 -- Hysteria
@@ -387,7 +395,7 @@ local function encode_hysteria2(node)
 		link = link .. "?" .. table.concat(p, "&")
 	end
 
-	return link .. "#" .. urlencode(node.name or "")
+	return 0, link .. "#" .. urlencode(node.name or "")
 end
 
 -- Hysteria2
@@ -398,6 +406,8 @@ local function encode_hysteria2(node)
 	if node["ports"] then table.insert(p, "mport=" .. urlencode(node["ports"])) end
 	if node.obfs then table.insert(p, "obfs=" .. node.obfs) end
 	if node["obfs-password"] then table.insert(p, "obfs-password=" .. node["obfs-password"]) end
+	if node["obfs-min-packet-size"] then table.insert(p, "minPacketSize=" .. node["obfs-min-packet-size"]) end
+	if node["obfs-max-packet-size"] then table.insert(p, "maxPacketSize=" .. node["obfs-max-packet-size"]) end
 	if node.up then table.insert(p, "upmbps=" .. node.up) end
 	if node.down then table.insert(p, "downmbps=" .. node.down) end
 
@@ -409,7 +419,7 @@ local function encode_hysteria2(node)
 		link = link .. "?" .. table.concat(p, "&")
 	end
 
-	return link .. "#" .. urlencode(node.name or "")
+	return 0, link .. "#" .. urlencode(node.name or "")
 end
 
 -- TUIC
@@ -434,31 +444,47 @@ local function encode_tuic(node)
 		link = link .. "?" .. table.concat(p, "&")
 	end
 
-	return link .. "#" .. urlencode(node.name or "")
+	return 0, link .. "#" .. urlencode(node.name or "")
 end
 
 -- AnyTLS
 local function encode_anytls(node)
+	local err_msg
+	if node["shadow-tls-opts"] then
+		err_msg = "ShadowTLS"
+	elseif node["restls-opts"] then
+		err_msg = "ResTLS"
+	elseif node["jls-opts"] then
+		err_msg = "JLS"
+	end
+	if err_msg then
+		err_msg = "订阅转换 → 丢弃 AnyTLS 节点：" .. (node.name or "") .. "，因 Sing-Box 不支持 AnyTLS + " .. err_msg
+		return 1, err_msg
+	end
+
 	local o = build_common(node)
 
 	local link = "anytls://" .. (node.password or "") .. "@" .. host_format(node.server) .. ":" .. node.port
 	local p = {}
 
+	if o.tls.security then table.insert(p, "security=" .. o.tls.security) end
+	if o.tls.pbk then table.insert(p, "pbk=" .. urlencode(o.tls.pbk)) end
+	if o.tls.sid then table.insert(p, "sid=" .. urlencode(o.tls.sid)) end
 	if o.tls.sni then table.insert(p, "sni=" .. urlencode(o.tls.sni)) end
 	if o.tls.alpn then table.insert(p, "alpn=" .. urlencode(o.tls.alpn)) end
 	if o.tls.fp then table.insert(p, "fp=" .. urlencode(o.tls.fp)) end
 	if o.tls.ech then table.insert(p, "ech=" .. urlencode(o.tls.ech)) end
 	if o.tls.pcs then
-		table.insert(p, "allowInsecure=1")
+		table.insert(p, "insecure=1")
 	else
-		table.insert(p, "allowInsecure=" .. (o.tls.insecure and "1" or "0"))
+		table.insert(p, "insecure=" .. (o.tls.insecure and "1" or "0"))
 	end
 
 	if #p > 0 then
 		link = link .. "?" .. table.concat(p, "&")
 	end
 
-	return link .. "#" .. urlencode(node.name or "")
+	return 0, link .. "#" .. urlencode(node.name or "")
 end
 
 -- SSR
@@ -475,13 +501,15 @@ local function encode_ssr(node)
 		link = link .. "?" .. table.concat(p, "&")
 	end
 
-	return "ssr://" .. base64(link)
+	return 0, "ssr://" .. base64(link)
 end
 
 local function encode_node(node)
 	if (not node.type) or (not node.name) then return nil end
 
 	local t = node.type
+
+	node.server = domain_redir[node.server] or node.server
 
 	if t == "vless" then return encode_vless(node)
 	elseif t == "trojan" then return encode_trojan(node)
@@ -507,10 +535,21 @@ function parseClashNode(raw, remark)
 
 	api.log('检测到 Clash 订阅，正在进行转换 ...')
 
+	-- Some airports use hosts domain redirect to disguise the real node domain name.
+	for k, v in pairs(data.hosts or {}) do
+		if type(k) == "string" and type(v) == "string" then
+			if api.datatypes.hostname(k) and api.datatypes.hostname(v) then
+				domain_redir[k] = v
+			end
+		end
+	end
+
 	local links = {}
 	for _, node in ipairs(data.proxies) do
-		local link = encode_node(node)
-		if link then
+		local err, link = encode_node(node)
+		if err == 1 and link then
+			api.log(link)
+		elseif link then
 			table.insert(links, link)
 		end
 	end
