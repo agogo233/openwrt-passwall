@@ -1253,6 +1253,9 @@ msgstr "访问控制"
 msgid "ACLs is a tools which used to designate specific IP proxy mode."
 msgstr "访问控制列表是用于指定特殊 IP 代理模式的工具。"
 
+msgid "Use global configuration when using the global node."
+msgstr "与全局节点相同时，将使用全局配置。"
+
 msgid "Example:"
 msgstr "例："
 
@@ -2183,3 +2186,6 @@ msgstr "密码套件"
 
 msgid "Configures the list of supported cipher suites, separated by :"
 msgstr "配置支持的密码套件列表，以冒号 (:) 分隔。"
+
+msgid "Connection Reuse"
+msgstr "连接复用"

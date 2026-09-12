@@ -103,6 +103,7 @@ local function curl(url, file)
 		"--connect-timeout 3",
 		"--max-time 300",
 		"--speed-limit 51200 --speed-time 15",
+		"-H 'Accept: */*'",
 		'-A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"',
 		"--dump-header -",
 		"-w '\\n%{http_code}'"
@@ -510,7 +511,7 @@ local function fetch_rule(rule_name, rule_type, url, exclude_domain, max_retries
 				local set_name = "psw_" .. rule_name
 				if rule_name == "chnroute" then set_name = "psw_chn"
 				elseif rule_name == "chnroute6" then set_name = "psw_chn6" end
-                
+
 				local addr_type = (rule_type == "ip4") and "ipv4_addr" or "ipv6_addr"
 				gen_cache(set_name, addr_type, file_tmp, nft_file)
 				os.execute(string.format("mv -f %s %s.nft", nft_file, rule_final_path))

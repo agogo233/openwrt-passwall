@@ -15,6 +15,20 @@ TMP_ROUTE_PATH=${TMP_PATH}/route
 TMP_SCRIPT_FUNC_PATH=${TMP_PATH}/script_func
 RULES_PATH=/usr/share/${CONFIG}/rules
 
+IPv6_REGEX="([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|"
+IPv6_REGEX="${IPv6_REGEX}([0-9a-fA-F]{1,4}:){1,7}:|"
+IPv6_REGEX="${IPv6_REGEX}([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|"
+IPv6_REGEX="${IPv6_REGEX}([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|"
+IPv6_REGEX="${IPv6_REGEX}([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|"
+IPv6_REGEX="${IPv6_REGEX}([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|"
+IPv6_REGEX="${IPv6_REGEX}([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|"
+IPv6_REGEX="${IPv6_REGEX}[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|"
+IPv6_REGEX="${IPv6_REGEX}:((:[0-9a-fA-F]{1,4}){1,7}|:)|"
+IPv6_REGEX="${IPv6_REGEX}fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|"
+IPv6_REGEX="${IPv6_REGEX}::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|"
+IPv6_REGEX="${IPv6_REGEX}([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])"
+IPv4_REGEX="((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)"
+
 . /lib/functions/network.sh
 
 echolog() {
@@ -40,9 +54,10 @@ config_n_get() {
 	echo "${ret:=$3}"
 }
 
-config_t_set() {
+config_t_get() {
 	local index=${4:-0}
-	local ret=$(uci -q set "${CONFIG}.@${1}[${index}].${2}=${3}" 2>/dev/null)
+	local ret=$(uci -q get "${CONFIG}.@${1}[${index}].${2}" 2>/dev/null)
+	echo "${ret:=${3}}"
 }
 
 first_type() {
@@ -84,12 +99,12 @@ get_host_ip() {
 	local isip=""
 	local ip=""
 	if [ "$1" = "ipv6" ]; then
-		isip=$(echo $host | grep -E "([A-Fa-f0-9]{1,4}::?){1,7}[A-Fa-f0-9]{1,4}")
+		isip=$(echo $host | grep -Eo "$IPv6_REGEX")
 		if [ -n "$isip" ]; then
 			ip=$(echo "$host" | tr -d '[]')
 		fi
 	else
-		isip=$(echo $host | grep -E "([0-9]{1,3}[\.]){3}[0-9]{1,3}")
+		isip=$(echo $host | grep -Eo "$IPv4_REGEX")
 		[ -n "$isip" ] && ip=$isip
 	fi
 	[ -z "$isip" ] && {
@@ -207,31 +222,9 @@ check_host() {
 	return 0
 }
 
-get_first_dns() {
-	local __hosts_val=${1}; shift 1
-	__first() {
-		[ -z "${2}" ] && return 0
-		echo "${2}#${3}"
-		return 1
-	}
-	hosts_foreach "${__hosts_val}" __first "$@"
-}
-
-get_last_dns() {
-	local __hosts_val=${1}; shift 1
-	local __first __last
-	__every() {
-		[ -z "${2}" ] && return 0
-		__last="${2}#${3}"
-		__first=${__first:-${__last}}
-	}
-	hosts_foreach "${__hosts_val}" __first "$@"
-	[ "${__first}" =  "${__last}" ] || echo "${__last}"
-}
-
 normalize_dns() {
 	local s="$1"
-	local addr port
+	local addr port="${2-}"
 	case "$s" in
 		\[*\]:*)
 			# [ip6]:port
@@ -253,18 +246,22 @@ normalize_dns() {
 			# [ip6]
 			addr="${s#\[}"
 			addr="${addr%\]}"
-			port=""
 		;;
 		*)
 			addr="$s"
-			port=""
 		;;
 	esac
-	if [ -n "$port" ]; then
-		echo "${addr}#${port}"
-	else
-		echo "$addr"
-	fi
+	[ -n "$port" ] && echo "${addr}#${port}" || echo "$addr"
+}
+
+format_dns() {
+	local dns="${1%%#*}"
+	local port="${1#*#}"
+	[ "$port" = "$1" ] && port="${2-53}"
+	case "$dns" in
+		*:*) echo "[$dns]:$port" ;;
+		*)   echo "$dns:$port" ;;
+	esac
 }
 
 check_port_exists() {
