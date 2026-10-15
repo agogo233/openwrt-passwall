@@ -22,8 +22,11 @@ msgstr "连接失败"
 msgid "Touch Check"
 msgstr "点我检测"
 
-msgid "TLS handshake test, latency for reference only"
-msgstr "TLS握手测试，延时仅供参考"
+msgid "HTTP request latency, for reference only"
+msgstr "HTTP 请求延迟，仅供参考"
+
+msgid "Initial handshake time"
+msgstr "首次握手耗时"
 
 msgid "Kernel Unsupported"
 msgstr "内核不支持"
@@ -124,12 +127,6 @@ msgstr "当前节点：%s"
 msgid "DNS Shunt"
 msgstr "DNS分流"
 
-msgid "Domestic group name"
-msgstr "国内分组名"
-
-msgid "You only need to configure domestic DNS packets in SmartDNS, and fill in the domestic DNS group name here."
-msgstr "您只需要在SmartDNS配置好国内DNS分组，并在此处填入国内DNS分组名。"
-
 msgid "%s cannot be empty."
 msgstr "%s 不能为空。"
 
@@ -181,9 +178,6 @@ msgstr "用于 DNS 查询时通知 DNS 服务器，客户端所在的地理位�
 msgid "This feature requires the DNS server to support the Edns Client Subnet (RFC7871)."
 msgstr "此功能需要 DNS 服务器支持 EDNS Client Subnet（RFC7871）。"
 
-msgid "The effect is better, recommend."
-msgstr "效果更好，推荐使用。"
-
 msgid "ChinaDNS-NG (recommended)"
 msgstr "ChinaDNS-NG (推荐)"
 
@@ -207,6 +201,9 @@ msgstr "智能，接受直连 DNS 空响应"
 
 msgid "Smart: Forward to both direct and remote DNS, if the direct DNS resolution result is a mainland China IP, then use the direct result, otherwise use the remote result."
 msgstr "智能：同时转发给直连和远程 DNS，如果直连 DNS 解析结果是大陆 IP，则使用直连结果，否则使用远程结果。"
+
+msgid "Auto: Prefer mainland China IPs returned by direct DNS and fall back to remote DNS when no usable result is available."
+msgstr "自动：优先使用直连 DNS 返回的大陆 IP，无可用结果时回退到远程 DNS。"
 
 msgid "In smart mode, no-ip reply from Direct DNS:"
 msgstr "使用智能模式，直连 DNS 返回空响应时:"
@@ -995,9 +992,6 @@ msgstr "回滚中..."
 msgid "Update Options"
 msgstr "更新选项"
 
-msgid "The latest version: %s, currently does not support automatic update, if you need to update, please compile or download the ipk and then manually install."
-msgstr "最新版本：%s，目前暂不支持自动更新，如需更新，请自行编译或下载 ipk 然后手动安装。"
-
 msgid "Enable custom URL"
 msgstr "启用自定义规则地址"
 
@@ -1157,8 +1151,8 @@ msgstr "用于版本检查的 API URL"
 msgid "GitHub Proxy"
 msgstr "GitHub 反代"
 
-msgid "Use gh-proxy instead of proxy nodes for component updates."
-msgstr "开启后将使用 gh-proxy 反向代理，不通过节点更新组件。"
+msgid "Use GitHub instead of proxy nodes for component updates."
+msgstr "开启后将使用 GitHub 反向代理，不通过节点更新组件。"
 
 msgid "Node Subscribe"
 msgstr "节点订阅"
@@ -1651,6 +1645,27 @@ msgstr "启用节点日志"
 
 msgid "Log Level"
 msgstr "日志等级"
+
+msgid "Log Size"
+msgstr "日志大小"
+
+msgid "Enable WebUI"
+msgstr "启用 WebUI"
+
+msgid "Open WebUI"
+msgstr "打开 WebUI"
+
+msgid "WebUI Port"
+msgstr "WebUI 端口"
+
+msgid "WebUI Database Directory"
+msgstr "WebUI 数据库目录"
+
+msgid "WebUI Log Retention Days"
+msgstr "WebUI 日志保存天数"
+
+msgid "An absolute path without spaces is required."
+msgstr "请输入不含空格的绝对路径。"
 
 msgid "Not enabled log"
 msgstr "未启用日志"
@@ -2168,3 +2183,24 @@ msgstr "配置支持的密码套件列表，以冒号 (:) 分隔。"
 
 msgid "Connection Reuse"
 msgstr "连接复用"
+
+msgid "Installing..."
+msgstr "安装中"
+
+msgid "Do not refresh or switch pages during installation."
+msgstr "安装时请勿刷新页面和切换页面。"
+
+msgid "Update failed"
+msgstr "更新失败"
+
+msgid "Unknown error"
+msgstr "未知错误"
+
+msgid "MASQUE Path"
+msgstr "MASQUE 路径"
+
+msgid "Custom HTTP Headers"
+msgstr "自定义 HTTP 请求头"
+
+msgid "MASQUE Address"
+msgstr "MASQUE 隧道地址"

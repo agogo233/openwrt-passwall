@@ -24,6 +24,36 @@ local uci, uci_get, uci_set, uci_del, uci_foreach, uci_save = api.uci, api.uci_g
 local tinsert = table.insert
 local ssub, slen, schar, sbyte, sformat, sgsub = string.sub, string.len, string.char, string.byte, string.format, string.gsub
 
+-- [[ 逻辑锁 Start ]] --
+if not arg[1] then os.exit(0) end
+-- Both update scripts use the same lockf lock; the kernel releases it on exit.
+local update_lock = api.nixio.open(api.LOCK_PREFIX .. "_sub_rule.lock", api.nixio.open_flags("rdwr", "creat"))
+if not update_lock then
+	api.log("无法打开订阅/规则更新锁，退出。")
+	os.exit(1)
+end
+-- Scheduled updates wait for the lock; manual requests may skip a busy lock.
+if not update_lock:lock("tlock") then
+	if arg[3] ~= "cron" then
+		api.log("订阅或规则更新正在运行，本次请求跳过。")
+		os.exit(0)
+	end
+	local running = ({s = "订阅", r = "规则更新"})[update_lock:read(1)] or "订阅/规则更新"
+	update_lock:seek(0)
+	api.log("[" .. running .. "]实例正在运行，[订阅]进入队列等待...")
+	if not update_lock:lock("lock") then
+		api.log("无法取得更新锁，计划任务失败。")
+		os.exit(1)
+	end
+end
+-- Record the running task in the same file: s = subscription, r = rule update.
+update_lock:write("s")
+update_lock:seek(0)
+api.uci:revert(c_config)
+math.randomseed(os.time() + math.floor(os.clock() * 1000))
+local restart_required = false
+-- [[ 逻辑锁 End ]] --
+
 local has_ss_rust = api.is_finded("sslocal")
 local has_ssr = api.is_finded("ssr-local") and api.is_finded("ssr-redir")
 local has_singbox = api.finded_com("sing-box")
@@ -1776,16 +1806,19 @@ local function curl(url, file, ua, mode)
 	}
 
 	ua = (ua and ua ~= "") and ua or "passwall"
-	ua = (ua == "passwall") and ("passwall/" .. api.get_version()) or ua
+	ua = (ua == "passwall") and ("passwall/" .. api.get_version():match("^([^-]+)")) or ua
 	curl_args[#curl_args + 1] = '--user-agent "' .. ua .. '"'
+
+	local cookie_file = "/tmp/cookie_" .. api.gen_random_char(5)
+	curl_args[#curl_args + 1] = '-c "' .. cookie_file .. '" -b "' .. cookie_file .. '"'
 
 	local return_code, result
 	if mode == "direct" then
-		return_code, result = api.curl_base(url, file, curl_args)
+		return_code, result = api.curl_direct(url, file, curl_args)
 	elseif mode == "proxy" then
 		return_code, result = api.curl_proxy(url, file, curl_args)
 	else
-		return_code, result = api.curl_logic(url, file, curl_args)
+		return_code, result = api.curl_auto(url, file, curl_args)
 	end
 
 	if result and result ~= "" then
@@ -1800,6 +1833,8 @@ local function curl(url, file, ua, mode)
 	if header_str ~= "" then
 		header_str = header_str:gsub("\r", "")
 	end
+
+	api.remove(cookie_file)
 
 	return return_code, http_code, header_str
 end
@@ -2102,15 +2137,7 @@ local function update_node(manual)
 
 	uci_save(true)
 
-	if arg[3] == "cron" then
-		if not fs.access(api.LOCK_PREFIX .. ".lock") then
-			luci.sys.call("touch %s_cron.lock" % api.LOCK_PREFIX)
-		end
-	end
-
-	if manual ~= 1 then
-		luci.sys.call("/etc/init.d/passwall restart > /dev/null 2>&1 &")
-	end
+	if manual ~= 1 then restart_required = true end
 end
 
 local function parse_link(raw, add_mode, group, sub_cfg)
@@ -2245,7 +2272,7 @@ local execute = function()
 				return_code, value.http_code, headers = curl(url, tmp_file, ua, access_mode)
 				if return_code ~= 0 then
 					fail_list[#fail_list + 1] = value
-					luci.sys.call("rm -f " .. tmp_file)
+					api.remove(tmp_file)
 				end
 			end
 			if fs.access(tmp_file) then
@@ -2255,8 +2282,8 @@ local execute = function()
 					f:close()
 					local raw_data = api.trim(stdout)
 					local old_md5 = value.md5 or ""
-					local new_md5 = luci.sys.exec("md5sum " .. tmp_file .. " 2>/dev/null | awk '{print $1}'"):gsub("\n", "")
-					if not manual_sub and old_md5 == new_md5 then
+					local new_md5 = api.md5_file(tmp_file)
+					if not manual_sub and new_md5 ~= "" and old_md5 == new_md5 then
 						log('订阅:【' .. remark .. '】没有变化，无需更新。')
 					else
 						raw_data = parseClashNode(raw_data)
@@ -2268,7 +2295,7 @@ local execute = function()
 					fail_list[#fail_list + 1] = value
 				end
 				if not url_is_local then
-					luci.sys.call("rm -f " .. tmp_file)
+					api.remove(tmp_file)
 				end
 			end
 		end
@@ -2282,56 +2309,28 @@ local execute = function()
 	end
 end
 
-local function check_instance(action)
-	local sub_lock = api.LOCK_PREFIX .. "_subscribe.lock"
-	local rule_lock = api.LOCK_PREFIX .. "_rule_update.lock"
-
-	if action == "start" then
-		math.randomseed(os.time() + math.floor(os.clock() * 1000))
-		api.nixio.nanosleep(0, math.random(100, 1000) * 1000000)
-		if fs.access(sub_lock) then
-			log("有[订阅]实例正在运行，请稍后再试...\n")
-			os.exit(0)
-		else
-			luci.sys.call("touch " .. sub_lock)
-			uci:revert(c_config)
+if arg[1] == "start" then
+	log('开始订阅...')
+	xpcall(execute, function(e)
+		log(e)
+		if type(debug) == "table" and type(debug.traceback) == "function" then
+			log(debug.traceback())
 		end
-	elseif action == "end" then
-		luci.sys.call("rm -f " .. sub_lock)
-		return
-	end
-
-	if fs.access(rule_lock) then
-		log("[规则更新]实例正在运行，[订阅]进入队列等待...\n")
-	end
-	while fs.access(rule_lock) do
-		api.nixio.nanosleep(2, 0)
-	end
+		log('订阅发生错误。')
+	end)
+	log('订阅完毕...\n')
+elseif arg[1] == "add" then
+	local f = assert(io.open("/tmp/links.conf", 'r'))
+	local raw = f:read('*all')
+	f:close()
+	parse_link(raw, "1", arg[2])
+	update_node(1)
+	api.remove("/tmp/links.conf")
+elseif arg[1] == "truncate" then
+	truncate_nodes(arg[2])
 end
-
-if arg[1] then
-	check_instance("start")
-
-	if arg[1] == "start" then
-		log('开始订阅...')
-		xpcall(execute, function(e)
-			log(e)
-			if type(debug) == "table" and type(debug.traceback) == "function" then
-				log(debug.traceback())
-			end
-			log('发生错误, 正在恢复服务')
-		end)
-		log('订阅完毕...\n')
-	elseif arg[1] == "add" then
-		local f = assert(io.open("/tmp/links.conf", 'r'))
-		local raw = f:read('*all')
-		f:close()
-		parse_link(raw, "1", arg[2])
-		update_node(1)
-		luci.sys.call("rm -f /tmp/links.conf")
-	elseif arg[1] == "truncate" then
-		truncate_nodes(arg[2])
-	end
-
-	check_instance("end")
+update_lock:close()
+if restart_required then
+	local action = arg[3] == "cron" and " cron" or ""
+	luci.sys.call("/etc/init.d/passwall restart" .. action .. " > /dev/null 2>&1 &")
 end
