@@ -46,6 +46,7 @@ function index()
 	entry({"admin", "services", appname, "app_update"}, cbi(appname .. "/client/app_update"), _("App Update"), 95).leaf = true
 	entry({"admin", "services", appname, "rule"}, cbi(appname .. "/client/rule"), _("Rule Manage"), 96).leaf = true
 	entry({"admin", "services", appname, "rule_list"}, cbi(appname .. "/client/rule_list", {autoapply = true}), _("Rule List"), 97).leaf = true
+	entry({"admin", "services", appname, "route_query"}, cbi(appname .. "/client/route_query"), _("Route Query"), 97.5).leaf = true
 	entry({"admin", "services", appname, "node_subscribe_config"}, cbi(appname .. "/client/node_subscribe_config")).leaf = true
 	entry({"admin", "services", appname, "node_config"}, cbi(appname .. "/client/node_config")).leaf = true
 	entry({"admin", "services", appname, "shunt_rules"}, cbi(appname .. "/client/shunt_rules")).leaf = true
@@ -123,6 +124,9 @@ function index()
 
 	--[[geoview]]
 	entry({"admin", "services", appname, "geo_view"}, call("geo_view")).leaf = true
+
+	--[[route_query]]
+	entry({"admin", "services", appname, "route_query_action"}, call("route_query_action")).leaf = true
 
 	entry({"admin", "services", appname, "fetch_certsha256"}, call("fetch_certsha256")).leaf = true
 	entry({"admin", "services", appname, "gen_wireguard_key"}, call("gen_wireguard_key")).leaf = true
@@ -1115,6 +1119,269 @@ function subscribe_del_node()
 		luci.sys.call("lua /usr/share/" .. appname .. "/subscribe.lua truncate " .. luci.util.shellquote(remark) .. " > /dev/null 2>&1")
 	end
 	http.status(200, "OK")
+end
+
+function route_query_action()
+	local route_match = require "luci.passwall.route_match"
+	local target = api.trim(http.formvalue("target") or "")
+	local port = api.trim(http.formvalue("port") or "")
+	local proto = api.trim(http.formvalue("proto") or "tcp")
+	local protocol = api.trim(http.formvalue("protocol") or "")
+
+	local function resp(data)
+		http.prepare_content("application/json")
+		http.write(jsonStringify(data or {}))
+	end
+
+	if target == "" then
+		resp({code = 0, message = i18n.translate("请输入域名或 IP 地址！")})
+		return
+	end
+	if proto ~= "tcp" and proto ~= "udp" then proto = "tcp" end
+	port = tonumber(port) and tostring(math.floor(tonumber(port))) or ""
+	if port ~= "" and not api.datatypes.port(port) then
+		resp({code = 0, message = i18n.translate("端口无效！")})
+		return
+	end
+
+	local is_ip = route_match.is_ip(target)
+	local is6 = route_match.is_ipv6(target)
+
+	-- Build cfg from uci
+	local g = api.uci_get_c("@global[0]") or {}
+	local gf = api.uci_get_c("@global_forwarding[0]") or {}
+
+	-- Global node type: decides whether a shunting node is in use.
+	local node_id = g.node
+	local node_type = ""
+	local node_protocol = ""
+	local node_remarks = ""
+	if node_id then
+		local n = api.uci_get_c("nodes", node_id) or {}
+		node_type = n.type or ""
+		node_protocol = n.protocol or ""
+		node_remarks = api.get_node_remarks(n) or ""
+	end
+	local use_shunt_node = "0"
+	if node_protocol == "_shunt" then
+		use_shunt_node = "1"
+	end
+
+	local cfg = {
+		tcp_proxy_mode = g.tcp_proxy_mode or "disable",
+		udp_proxy_mode = g.udp_proxy_mode or "disable",
+		use_direct_list = g.use_direct_list or "1",
+		use_proxy_list = g.use_proxy_list or "1",
+		use_block_list = g.use_block_list or "1",
+		use_gfw_list = g.use_gfw_list or "1",
+		chn_list = g.chn_list or "direct",
+		use_shunt_node = use_shunt_node,
+		use_fakedns = (g.remote_fakedns or "0") == "1" and "1" or "0",
+		tcp_no_redir_ports = gf.tcp_no_redir_ports or "disable",
+		udp_no_redir_ports = gf.udp_no_redir_ports or "disable",
+		tcp_proxy_drop_ports = gf.tcp_proxy_drop_ports or "disable",
+		udp_proxy_drop_ports = gf.udp_proxy_drop_ports or "disable",
+		tcp_redir_ports = gf.tcp_redir_ports or "1:65535",
+		udp_redir_ports = gf.udp_redir_ports or "1:65535",
+	}
+
+	-- Determine the transparent-proxy backend: nft vs ipset/iptables.
+	-- Mirrors app.sh check_run_environment:
+	--   prefer nft when fw4 + dnsmasq nftset, else ipset/iptables when
+	--   dnsmasq ipset + ipset + iptables; order depends on prefer_nft.
+	local prefer_nft = gf.prefer_nft or "1"
+	local exec = function(c) return luci.sys.exec(c or "") end
+	local has_fw4 = exec("command -v fw4 2>/dev/null").gsub("%s", "") ~= ""
+	local dns_nft = exec("dnsmasq -v 2>/dev/null | grep -qw nftset && echo 1 || echo 0").gsub("%s", "") == "1"
+	local dns_ipset = exec("dnsmasq -v 2>/dev/null | grep -qw ipset && echo 1 || echo 0").gsub("%s", "") == "1"
+	local has_ipset = exec("command -v ipset 2>/dev/null").gsub("%s", "") ~= ""
+	local has_ipt = exec("command -v iptables 2>/dev/null").gsub("%s", "") ~= ""
+	local use_nft = nil
+	if prefer_nft == "1" then
+		if has_fw4 and dns_nft then
+			use_nft = true
+		elseif has_ipset and has_ipt and dns_ipset then
+			use_nft = false
+		end
+	else
+		if has_ipset and has_ipt and dns_ipset then
+			use_nft = false
+		elseif has_fw4 and dns_nft then
+			use_nft = true
+		end
+	end
+	if use_nft == nil then
+		-- no backend detected; default to nft try (harmless on missing sets)
+		use_nft = has_fw4
+	end
+
+	local function nft_hit(set_name, ip)
+		if not set_name then return false end
+		if use_nft then
+			local cmd = string.format("nft get element inet passwall %s { %s } 2>/dev/null",
+				util.shellquote(set_name), util.shellquote(ip))
+			return luci.sys.call(cmd) == 0
+		else
+			return luci.sys.call(string.format("ipset -q test %s %s 2>/dev/null",
+				util.shellquote(set_name), util.shellquote(ip))) == 0
+		end
+	end
+
+	local ruledir_data = {}
+
+	-- System-level decision
+	if is_ip then
+		local decision, matched, note = route_match.system_ip_decision(cfg, target, tonumber(port) or nil, proto, nft_hit)
+		ruledir_data.system = {
+			decision = decision,
+			matched = matched,
+			note = note,
+			backend = use_nft and "nftables" or "ipset/iptables",
+		}
+	else
+		local files = {
+			block = "/etc/passwall/rules/block_host",
+			direct = "/etc/passwall/rules/direct_host",
+			proxy = "/etc/passwall/rules/proxy_host",
+			gfw = "/usr/share/passwall/rules/gfwlist",
+			chn = "/usr/share/passwall/rules/chnlist",
+		}
+		local readfile = function(path) return fs.access(path) and fs.readfile(path) or "" end
+		local decision, matched, entry, note = route_match.system_domain_decision(cfg, target, tonumber(port) or nil, proto, files, readfile)
+		-- resolve domain to IPs for a second-pass IP decision (only when no rule matched)
+		local resolved = {}
+		if not decision then
+			local ips = api.resolve_domain(target)
+			if ips and #ips > 0 then
+				for _, ip in ipairs(ips) do
+					local dd, dm, dn = route_match.system_ip_decision(cfg, ip, tonumber(port) or nil, proto, nft_hit)
+					resolved[#resolved + 1] = { ip = ip, decision = dd, matched = dm, note = dn }
+				end
+			end
+		end
+		ruledir_data.system = {
+			decision = decision,
+			matched = matched,
+			entry = entry,
+			note = note,
+			resolved = #resolved > 0 and resolved or nil,
+			backend = use_nft and "nftables" or "ipset/iptables",
+		}
+	end
+
+	-- Inject external tools into the route engine so geosite/geoip/rule_set/
+	-- regexp matches can be evaluated.
+	local function sh_exec(cmd)
+		return luci.sys.exec(cmd or "")
+	end
+	local function sh_hit(cmd)
+		return luci.sys.call(cmd or "") == 0
+	end
+	local geoview_bin = api.finded_com("geoview") or ""
+	local singbox_bin = api.finded_com("sing-box") or ""
+	local geo_dir = (api.uci_get_c("@global_rules[0]", "v2ray_location_asset") or "/usr/share/v2ray/"):match("^(.*)/")
+	local srs_dir = api.CACHE_PATH .. "/singbox_srss/"
+
+	local function geosite_match(tag, domain)
+		if geoview_bin == "" then return nil end
+		local cmd = string.format("%s -type geosite -action lookup -input %s -value %s -lowmem=true",
+			util.shellquote(geoview_bin), util.shellquote(geo_dir .. "geosite.dat"), util.shellquote(domain))
+		local out = sh_exec(cmd):lower()
+		return out:find(tag:lower(), 1, true) ~= nil
+	end
+	local function geoip_match(tag, ip)
+		if geoview_bin == "" then return nil end
+		local cmd = string.format("%s -type geoip -action lookup -input %s -value %s -lowmem=true",
+			util.shellquote(geoview_bin), util.shellquote(geo_dir .. "geoip.dat"), util.shellquote(ip))
+		local out = sh_exec(cmd):lower()
+		return out:find(tag:lower(), 1, true) ~= nil
+	end
+	local function rule_set_match(name, target)
+		if singbox_bin == "" then return nil end
+		-- name may embed "local:" prefix; strip for file path
+		name = name:gsub("^local:", "")
+		local srs_path = srs_dir .. name
+		if srs_path:sub(-4) ~= ".srs" then srs_path = srs_path .. ".srs" end
+		if not fs.access(srs_path) then return nil end
+		local cmd = string.format("%s rule-set match %s %s",
+			util.shellquote(singbox_bin), util.shellquote(srs_path), util.shellquote(target))
+		return sh_hit(cmd)
+	end
+	route_match.set_env({
+		exec = sh_exec,
+		geosite_match = geosite_match,
+		geoip_match = geoip_match,
+		rule_set_match = rule_set_match,
+		shell_quote = util.shellquote,
+	})
+
+	-- Client-level decision by inspecting the running core config (global.json)
+	local global_json_path = "/tmp/etc/" .. appname .. "/acl/default/global.json"
+	local gc_json = fs.access(global_json_path) and api.is_json(fs.readfile(global_json_path))
+	local gc = gc_json and jsonParse(gc_json) or nil
+
+	-- core kind: sing-box / xray only (special protocols dispatch to one of them)
+	local core_kind = nil
+	if node_type == "sing-box" or node_type == "Xray" then
+		core_kind = (node_type == "sing-box") and "singbox" or "xray"
+	end
+
+	local client = { available = false }
+	if not node_id then
+		client.note = i18n.translate("未配置全局节点")
+	elseif not core_kind then
+		client.note = i18n.translate("当前全局节点类型不参与代理客户端路由分流，走向由系统级转发决定")
+	elseif not gc then
+		client.note = i18n.translate("未能读取代理客户端运行配置(global.json)，代理客户端分流无法判定")
+	elseif gc.route and core_kind == "singbox" then
+		local rules = gc.route.rules or {}
+		local final = gc.route.final
+		local res = route_match.core_decision("singbox", rules, target, final, {
+			port = tonumber(port) or nil,
+			proto = proto,
+			protocol = protocol ~= "" and protocol or nil,
+			rule_set_match = nil,
+		})
+		client.available = true
+		client.core = "sing-box"
+		client.outbound = res.outbound
+		client.rule = res.rule
+		client.matched = res.matched
+		client.note = res.note
+		client.final = res.check == "default"
+	elseif gc.routing and core_kind == "xray" then
+		local rules = gc.routing.rules or {}
+		local final = ""
+		local res = route_match.core_decision("xray", rules, target, final, {
+			port = tonumber(port) or nil,
+			proto = proto,
+			protocol = protocol ~= "" and protocol or nil,
+			rule_set_match = nil,
+		})
+		client.available = true
+		client.core = "xray"
+		client.outbound = res.outbound
+		client.rule = res.rule
+		client.matched = res.matched
+		client.note = res.note
+		client.final = res.check == "default"
+	end
+
+	resp({
+		code = 1,
+		target = target,
+		type = is_ip and "ip" or "domain",
+		family = (is_ip and (is6 and "ipv6" or "ipv4")) or "",
+		port = port,
+		proto = proto,
+		node_id = node_id,
+		node_type = node_type,
+		node_remarks = node_remarks,
+		system = ruledir_data.system,
+		client = client,
+		geoview_bin = geoview_bin,
+		singbox_bin = singbox_bin,
+	})
 end
 
 function subscribe_del_all()
