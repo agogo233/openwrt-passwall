@@ -1157,7 +1157,7 @@ function route_query_action()
 	local node_protocol = ""
 	local node_remarks = ""
 	if node_id then
-		local n = api.uci_get_c("nodes", node_id) or {}
+		local n = api.uci_get_c(node_id) or {}
 		node_type = n.type or ""
 		node_protocol = n.protocol or ""
 		node_remarks = api.get_node_remarks(n) or ""

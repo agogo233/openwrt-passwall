@@ -757,10 +757,12 @@ end
 function get_node_remarks(n)
 	local remarks = ""
 	if n then
-		local type_name = n.type
+		local type_name = n.type or ""
+		local node_remarks = n.remarks or ""
+		if type_name == "" then return remarks end
 		if n.type == "sing-box" then type_name = "Sing-Box" end
 		if n.protocol and (n.protocol == "_balancing" or n.protocol == "_shunt" or n.protocol == "_iface" or n.protocol == "_urltest") then
-			remarks = trim(string.format("%s：[%s]", type_name .. " " .. i18n.translatef(n.protocol), n.remarks))
+			remarks = trim(string.format("%s：[%s]", type_name .. " " .. i18n.translatef(n.protocol), node_remarks))
 		else
 			if (n.type == "sing-box" or n.type == "Xray") and n.protocol then
 				local protocol = n.protocol
@@ -790,7 +792,7 @@ function get_node_remarks(n)
 			if (n.type == "Hysteria2" or n.protocol == 'hysteria2') and n.hysteria2_realms then
 				type_name = type_name .. " Realm"
 			end
-			remarks = trim(string.format("%s：[%s]", type_name, n.remarks))
+			remarks = trim(string.format("%s：[%s]", type_name, node_remarks))
 		end
 	end
 	return remarks
