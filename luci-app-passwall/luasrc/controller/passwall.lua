@@ -1317,8 +1317,11 @@ function route_query_action()
 
 	-- Client-level decision by inspecting the running core config (global.json)
 	local global_json_path = "/tmp/etc/" .. appname .. "/acl/default/global.json"
-	local gc_json = fs.access(global_json_path) and api.is_json(fs.readfile(global_json_path))
-	local gc = gc_json and jsonParse(gc_json) or nil
+	local gc = nil
+	if fs.access(global_json_path) then
+		local gc_raw = fs.readfile(global_json_path)
+		if api.is_json(gc_raw) then gc = jsonParse(gc_raw) end
+	end
 
 	-- core kind: sing-box / xray only (special protocols dispatch to one of them)
 	local core_kind = nil
