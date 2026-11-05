@@ -81,5 +81,11 @@ chk("acl.nomatch", r.acl and r.acl.matched, false)
 r = M.query({ target = "www.google.com", port = "443", proto = "tcp", src = "not-an-ip" }, env)
 chk("acl.invalidsrc", r.code, 0)
 
+local rqrule_files = 0
+for k in pairs(fs_mem) do
+	if k:find("rqrule_", 1, true) then rqrule_files = rqrule_files + 1 end
+end
+chk("no.rqrule.leak", rqrule_files, 0)
+
 print(string.format("query-test: %d passed, %d failed", pass, fail))
 return { pass = pass, fail = fail }

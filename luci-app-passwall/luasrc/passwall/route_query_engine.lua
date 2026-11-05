@@ -88,10 +88,10 @@ function M.acl_cfg(cfg, acl)
 end
 
 --------------------------------------------------------------------
--- Transparent-proxy backend detection (disk-cached, 60s TTL)
+-- Transparent-proxy backend detection (disk-cached, 300s TTL)
 --------------------------------------------------------------------
 
-local BACKEND_TTL = 60
+local BACKEND_TTL = 300
 
 function M.backend_cache_key(env, prefer_nft)
 	return env.api.CACHE_PATH .. "/route_query_backend_" .. (prefer_nft or "1")
@@ -139,31 +139,6 @@ function M.detect_backend(env, gf)
 	return val
 end
 
---------------------------------------------------------------------
--- Rule-file read cache (content cached by fs.stat signature)
---------------------------------------------------------------------
-
--- readfile wrapper that only re-reads the source file when its stat signature
--- (dev/ino/size/mtime/ctime) changes. Reuses the "binver" pattern from api.lua.
-function M.cached_readfile(env, path)
-	local api = env.api
-	local fs = api.fs
-	if not fs.access(path) then return "" end
-	local stat = fs.stat(path)
-	if not (stat and stat.dev and stat.ino and stat.size and stat.mtime and stat.ctime) then
-		return fs.readfile(path) or ""
-	end
-	local sig = table.concat({stat.dev, stat.ino, stat.size, stat.mtime, stat.ctime}, "_")
-	local cache_path = api.CACHE_PATH .. "/rqrule_" .. sig .. "_" .. #path
-	if fs.access(cache_path) then
-		local cached = fs.readfile(cache_path)
-		if cached then return cached end
-	end
-	local content = fs.readfile(path) or ""
-	fs.writefile(cache_path, content)
-	return content
-end
-
 local RULE_FILES = {
 	block = "/etc/passwall/rules/block_host",
 	direct = "/etc/passwall/rules/direct_host",
@@ -206,7 +181,7 @@ function M.system_decide(env, target, port, proto, cfg, backend, files, use_dns)
 	end
 
 	files = files or RULE_FILES
-	local readfile = function(path) return M.cached_readfile(env, path) end
+	local readfile = function(path) return api.fs.readfile(path) end
 	local decision, matched, entry, note = rm.system_domain_decision(cfg, target, port, proto, files, readfile)
 	local resolved = {}
 	local dns_note

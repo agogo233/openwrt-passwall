@@ -30,7 +30,7 @@ chk("b2.val", b2, "ipset")
 chk("b2.calls.noexec", exec_calls, calls1)  -- cached: no new exec
 
 -- TTL expiry: rewrite cache with old timestamp -> reprobe
-fs_mem[M.backend_cache_key(env)] = (os.time() - 120) .. " ipset\n"
+fs_mem[M.backend_cache_key(env)] = (os.time() - 320) .. " ipset\n"
 local b3 = M.detect_backend(env, gf)
 chk("b3.calls.reprobe", exec_calls, calls1 + 5)
 
