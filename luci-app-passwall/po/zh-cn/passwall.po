@@ -121,6 +121,9 @@ msgstr "使用全局配置"
 msgid "DNS"
 msgstr "DNS"
 
+msgid "按解析 IP 判定"
+msgstr "按解析 IP 判定"
+
 msgid "来源设备 IP 无效！"
 msgstr "来源设备 IP 无效！"
 

@@ -123,7 +123,7 @@ local api = map.api
 				html += '<div class="rq-detail">' + rqEsc(r.ip) + " " + rqBadge(r.decision) + '</div>';
 			});
 		}
-		if (sys.decision == null) html += '<div class="rq-note"><%:未匹配到任何域名规则，未做 IP 判定(解析失败/规则开关关闭)。%></div>';
+		if (sys.decision == null && !(sys.resolved && sys.resolved.length > 0)) html += '<div class="rq-note"><%:未匹配到任何域名规则，未做 IP 判定(解析失败/规则开关关闭)。%></div>';
 		html += "</div>";
 		return html;
 	}

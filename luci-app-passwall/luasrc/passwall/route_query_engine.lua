@@ -165,6 +165,7 @@ end
 -- Run the system-level decision for one target under one cfg/backend.
 -- Returns a response-ready table.
 function M.system_decide(env, target, port, proto, cfg, backend, files, use_dns)
+	local trans = env.i18n and env.i18n.translate or function(s) return s end
 	local rm = env.rm
 	local hit = function(name, ip) return nft_hit(env, backend, name, ip) end
 	local api = env.api
@@ -197,11 +198,24 @@ function M.system_decide(env, target, port, proto, cfg, backend, files, use_dns)
 			dns_note = "域名解析失败"
 		end
 	end
+	local final_decision, final_matched, final_note = decision, matched, note
+	if not final_decision and #resolved > 0 then
+		local all = resolved[1].decision
+		local same = all ~= nil
+		for i = 2, #resolved do
+			if resolved[i].decision ~= all then same = false break end
+		end
+		if same then
+			final_decision = all
+			final_matched = nil
+			final_note = (final_note and final_note .. "；" or "") .. trans("按解析 IP 判定")
+		end
+	end
 	return {
-		decision = decision,
-		matched = matched,
+		decision = final_decision,
+		matched = final_matched,
 		entry = entry,
-		note = note,
+		note = final_note,
 		resolved = #resolved > 0 and resolved or nil,
 		dns_note = dns_note,
 		backend = backend == "nft" and "nftables" or "ipset/iptables",
