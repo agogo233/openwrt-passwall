@@ -1191,11 +1191,11 @@ function route_query_action()
 	--   dnsmasq ipset + ipset + iptables; order depends on prefer_nft.
 	local prefer_nft = gf.prefer_nft or "1"
 	local exec = function(c) return luci.sys.exec(c or "") end
-	local has_fw4 = exec("command -v fw4 2>/dev/null").gsub("%s", "") ~= ""
-	local dns_nft = exec("dnsmasq -v 2>/dev/null | grep -qw nftset && echo 1 || echo 0").gsub("%s", "") == "1"
-	local dns_ipset = exec("dnsmasq -v 2>/dev/null | grep -qw ipset && echo 1 || echo 0").gsub("%s", "") == "1"
-	local has_ipset = exec("command -v ipset 2>/dev/null").gsub("%s", "") ~= ""
-	local has_ipt = exec("command -v iptables 2>/dev/null").gsub("%s", "") ~= ""
+	local has_fw4 = exec("command -v fw4 2>/dev/null"):gsub("%s", "") ~= ""
+	local dns_nft = exec("dnsmasq -v 2>/dev/null | grep -qw nftset && echo 1 || echo 0"):gsub("%s", "") == "1"
+	local dns_ipset = exec("dnsmasq -v 2>/dev/null | grep -qw ipset && echo 1 || echo 0"):gsub("%s", "") == "1"
+	local has_ipset = exec("command -v ipset 2>/dev/null"):gsub("%s", "") ~= ""
+	local has_ipt = exec("command -v iptables 2>/dev/null"):gsub("%s", "") ~= ""
 	local use_nft = nil
 	if prefer_nft == "1" then
 		if has_fw4 and dns_nft then
