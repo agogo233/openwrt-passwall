@@ -97,11 +97,11 @@ url_test_node() {
 
 speed_test_node() {
 	local node_id=$1
-	# 200MB Cloudflare 测速文件，千兆下约 1.6s 下载窗口。
-	# 慢节点超过 --max-time 10 时 curl 超时（非 0 退出码）会被 node_probe 的
-	# `|| result=0` 覆盖为 0，前端将显示 Timeout 而不是部分速度。
+	# Cloudflare 测速文件 99MB（其 __down 端点 bytes 上限为 <100000000，超限返回 403）。
+	# 千兆下约 0.8s 完成；--max-time 20 时最慢可测约 40Mbps，更慢节点 curl 超时（非 0 退出码）
+	# 会被 node_probe 的 `|| result=0` 覆盖为 0，前端显示 Timeout 而不是部分速度。
 	# 速度由 size_download / (time_total - time_starttransfer) 计算。
-	node_probe "$node_id" "https://speed.cloudflare.com/__down?bytes=209715200" --max-time 10 -w "%{http_code}:%{size_download}:%{time_starttransfer}:%{time_total}"
+	node_probe "$node_id" "https://speed.cloudflare.com/__down?bytes=99000000" --max-time 20 -w "%{http_code}:%{size_download}:%{time_starttransfer}:%{time_total}"
 }
 
 arg1=$1

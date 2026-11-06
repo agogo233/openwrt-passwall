@@ -480,7 +480,7 @@ function speedtest_node()
 	local code, size, pretransfer, total = result:match("^%s*(%d+):(%d+):([%d%.]+):([%d%.]+)%s*$")
 	code, size, pretransfer, total = tonumber(code), tonumber(size), tonumber(pretransfer), tonumber(total)
 	if code and code > 0 then e.http_code = code end
-	if code and code >= 200 and code < 600 and size and size > 0 and pretransfer and pretransfer >= 0 and total and total > pretransfer then
+	if code and code >= 200 and code < 400 and size and size > 0 and pretransfer and pretransfer >= 0 and total and total > pretransfer then
 		e.download_speed = string.format("%.0f", size / (total - pretransfer))
 		e.size_download = size
 	end

@@ -853,7 +853,7 @@ table td, .table .td {
 				dom.style.color = "red";
 				dom.innerText = "<%:Error%>";
 			}
-		}, 20000);
+		}, 40000);
 		XHR.get('<%=api.url("speedtest_node")%>', {
 				id: cbi_id
 			},
@@ -875,7 +875,7 @@ table td, .table .td {
 							text = Math.round(bps / 1024) + " KB/s";
 						dom.title = (bps * 8 / 1000000).toFixed(2) + " Mbps\n<%:Download size%>: " + (result.size_download / 1024 / 1024).toFixed(0) + " MB";
 					} else {
-						text = result.http_code >= 400 ? "HTTP " + result.http_code : "<%:Timeout%>";
+						text = result.http_code ? "HTTP " + result.http_code : "<%:Timeout%>";
 					}
 				}
 				dom.innerText = text;
