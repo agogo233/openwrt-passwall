@@ -1144,16 +1144,45 @@ function route_query_action()
 		target = http.formvalue("target") or "",
 		port = http.formvalue("port") or "",
 		proto = http.formvalue("proto") or "tcp",
-		protocol = http.formvalue("protocol") or "",
 		src = http.formvalue("src") or "",
 	}
+	local cfg = {}
+	cfg.use_block_list = uci_get("@global[0]", "use_block_list")
+	cfg.use_direct_list = uci_get("@global[0]", "use_direct_list")
+	cfg.use_proxy_list = uci_get("@global[0]", "use_proxy_list")
+	cfg.use_gfw_list = uci_get("@global[0]", "use_gfw_list")
+	cfg.chn_list = uci_get("@global[0]", "chn_list")
+	cfg.proxy_mode = uci_get("@global[0]", "tcp_proxy_mode")
+	cfg.use_fakedns = uci_get("@global[0]", "remote_fakedns")
+	cfg.tcp_redir_ports = uci_get("@global_forwarding[0]", "tcp_redir_ports")
+	cfg.udp_redir_ports = uci_get("@global_forwarding[0]", "udp_redir_ports")
+	cfg.tcp_no_redir_ports = uci_get("@global_forwarding[0]", "tcp_no_redir_ports")
+	cfg.udp_no_redir_ports = uci_get("@global_forwarding[0]", "udp_no_redir_ports")
+	cfg.use_shunt_node = "0"
+	local default_node = uci_get("@global[0]", "node") or ""
+	if default_node ~= "" and uci_get(default_node, "protocol") == "_shunt" then
+		cfg.use_shunt_node = "1"
+	end
+
+	local mapping_raw = ""
+	local ok, files = pcall(api.fs.glob, api.CACHE_PATH .. "/*/ipset.conf")
+	if ok and files and #files > 0 then
+		mapping_raw = api.fs.readfile(files[1]) or ""
+	end
+
 	local env = {
 		api = api,
-		rm = require "luci.passwall.route_match",
 		i18n = i18n,
+		tr = i18n.translate,
+		sys = api.sys,
+		readfile = api.fs.readfile,
+		jsonc_parse = api.jsonc and api.jsonc.parse,
+		resolve_domain = api.resolve_domain,
+		cfg = cfg,
+		dns_mapping_raw = mapping_raw,
+		appname = appname,
 	}
 	local data = engine.query(opts, env)
-
 	local function resp(d)
 		http.prepare_content("application/json")
 		http.write(jsonStringify(d or {}))

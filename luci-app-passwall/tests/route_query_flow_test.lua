@@ -1,95 +1,87 @@
 local here = (arg[0]:match("^(.*)[/\\]") or ".") .. "/../luasrc/passwall/"
-package.path = here .. "?.lua;" .. here .. "/../?.lua;" .. package.path
+package.path = here .. "?.lua;" .. package.path
 local M = require "route_query_engine"
-local rm = require "route_match"
-
-local fs_mem = {}
-local basic_uci = {}
-basic_uci["@global[0]"] = { node = "node1", tcp_proxy_mode = "gfw", remote_fakedns = "0" }
-basic_uci["@global_forwarding[0]"] = { prefer_nft = "1" }
-basic_uci["node1"] = { ["type"] = "sing-box", protocol = "vmess", remarks = "SG1" }
-basic_uci["acl1"] = { enabled = "1", remarks = "LAN", sources = { "192.168.1.100-192.168.1.200" }, tcp_proxy_mode = "global" }
-
-local api = {
-	appname = "passwall",
-	CACHE_PATH = "/tmp/engtest_cache",
-	fs = {
-		access = function(p) return fs_mem[p] ~= nil end,
-		readfile = function(p) return fs_mem[p] end,
-		writefile = function(p, c) fs_mem[p] = c return true end,
-		stat = function(p)
-			if fs_mem[p] then return { dev = 1, ino = 2, size = #fs_mem[p], mtime = 3, ctime = 4 } end
-		end,
-	},
-	sys = {
-		exec = function() return "" end,
-		call = function() return 0 end,
-	},
-	uci_get_c = function(sec)
-		return basic_uci[sec]
-	end,
-	uci_foreach_c = function(stype, fn)
-		for k, s in pairs(basic_uci) do
-			if k:match("^acl") then s[".name"] = k; fn(s) end
-		end
-	end,
-	is_json = function(s) return s and s:sub(1,1) == "{" end,
-	jsonc = { parse = function(s) return { route = { final = "proxy", rules = {} } } end },
-	trim = function(s) return (s and s:gsub("^%s+",""):gsub("%s+$","")) or "" end,
-	datatypes = { port = function(v) local n = tonumber(v) return v ~= "" and n ~= nil and n >= 1 and n <= 65535 end },
-	resolve_domain = function() return { "142.250.72.14" }, nil end,
-	get_node_remarks = function(n) return (n.type or "") .. ":" .. (n.remarks or "") end,
-	finded_com = function() return "/usr/bin/sing-box" end,
-}
-
-fs_mem["/tmp/etc/passwall/acl/default/global.json"] = '{"route":{"final":"proxy","rules":[]}}'
-for _, p in ipairs({"/etc/passwall/rules/block_host","/etc/passwall/rules/direct_host","/etc/passwall/rules/proxy_host","/usr/share/passwall/rules/gfwlist","/usr/share/passwall/rules/chnlist"}) do
-	fs_mem[p] = "# empty\n"
-end
-
-local env = { api = api, rm = rm, util = { shellquote = rm.shell_quote }, i18n = { translate = function(s) return s end } }
 
 local pass, fail = 0, 0
-local function chk(name, got, want)
-	if got == want then pass = pass + 1
-	else fail = fail + 1; print("FAIL "..name..": expected="..tostring(want).." got="..tostring(got)) end
+local function chk(n, g, w) if g == w then pass = pass + 1 else fail = fail + 1; print("FAIL "..n..": "..tostring(g).." != "..tostring(w)) end end
+
+local cfg = {
+	use_block_list = "1", use_direct_list = "1", use_proxy_list = "1",
+	use_gfw_list = "1", chn_list = "0", proxy_mode = "proxy",
+	tcp_redir_ports = "1:65535",
+}
+
+local function make_env(hit_sets, mapping_raw, resolve_ips, json_tbl)
+	local probe = function(cmd)
+		for _, s in ipairs(hit_sets or {}) do
+			if cmd:find(s) then return 0 end
+		end
+		return 1
+	end
+	return {
+		backend = "nft",
+		tr = function(s) return s end,
+		_probe = probe,
+		cfg = cfg,
+		dns_mapping_raw = mapping_raw or "",
+		resolve_domain = function(d) return resolve_ips or nil end,
+		readfile = function(p) return json_tbl and '{}' or nil end,
+		jsonc_parse = function(raw) return json_tbl end,
+		appname = "passwall",
+	}
 end
 
-local r = M.query({ target = "", port = "", proto = "tcp", src = "" }, env)
-chk("q.empty", r.code, 0)
+-- IP in gfw set -> proxy
+local env1 = make_env({"psw_gfw"})
+local r1 = M.query({ target = "1.2.3.4", port = "", proto = "tcp" }, env1)
+chk("ip gfw proxy", r1.system.decision, "proxy")
+chk("ip gfw matched", r1.system.matched, "psw_gfw")
+chk("ip type", r1.type, "ip")
+chk("ip family", r1.family, "ipv4")
 
-r = M.query({ target = "abc", port = "999999", proto = "tcp" }, env)
-chk("q.invalidport", r.code, 0)
+-- IP in block set -> block
+local env2 = make_env({"psw_block"})
+local r2 = M.query({ target = "5.6.7.8", port = "", proto = "tcp" }, env2)
+chk("ip block", r2.system.decision, "block")
 
-r = M.query({ target = "www.google.com", port = "443", proto = "tcp" }, env)
-chk("q.ok", r.code, 1)
-chk("q.type", r.type, "domain")
-chk("q.system", type(r.system), "table")
-chk("q.resolved", type(r.system.resolved), "table")
-chk("q.agg.decision", r.system.decision, "direct")
-chk("q.agg.matched", r.system.matched, nil)
-chk("q.agg.note", r.system.note, "按解析 IP 判定")
-chk("q.client.core", r.client.core, "sing-box")
-chk("q.node_remarks", r.node_remarks, "sing-box:SG1")
-chk("q.elapsed", type(r.elapsed), "number")
+-- Domain in mapping -> proxy
+local env3 = make_env({}, "nftset=/.google.com/4#inet#passwall#psw_gfw\n")
+local r3 = M.query({ target = "www.google.com", port = "", proto = "tcp" }, env3)
+chk("domain mapping proxy", r3.system.decision, "proxy")
+chk("domain mapping matched", r3.system.matched, "psw_gfw")
+chk("domain type", r3.type, "domain")
 
-r = M.query({ target = "www.google.com", port = "443", proto = "tcp", src = "192.168.1.150" }, env)
-chk("acl.match", r.acl and r.acl.matched, true)
-chk("acl.name", r.acl and r.acl.name, "LAN")
-chk("acl.system", type(r.acl and r.acl.system), "table")
-chk("acl.client", type(r.acl and r.acl.client), "table")
+-- Domain not in mapping -> resolve to IP in gfw -> proxy
+local env4 = make_env({"psw_gfw"}, "", { "1.2.3.4" })
+local r4 = M.query({ target = "unknown.example", port = "", proto = "tcp" }, env4)
+chk("domain resolve proxy", r4.system.decision, "proxy")
+chk("domain resolve resolved", r4.system.resolved and #r4.system.resolved == 1, true)
 
-r = M.query({ target = "www.google.com", port = "443", proto = "tcp", src = "10.0.0.9" }, env)
-chk("acl.nomatch", r.acl and r.acl.matched, false)
+-- Domain resolve fails -> no verdict
+local env5 = make_env({}, "", nil)
+local r5 = M.query({ target = "unknown.example", port = "", proto = "tcp" }, env5)
+chk("domain resolve fail note", r5.system.note ~= nil, true)
 
-r = M.query({ target = "www.google.com", port = "443", proto = "tcp", src = "not-an-ip" }, env)
-chk("acl.invalidsrc", r.code, 0)
+-- Empty target -> code 0
+local r6 = M.query({ target = "", port = "", proto = "tcp" }, env1)
+chk("empty target code", r6.code, 0)
 
-local rqrule_files = 0
-for k in pairs(fs_mem) do
-	if k:find("rqrule_", 1, true) then rqrule_files = rqrule_files + 1 end
-end
-chk("no.rqrule.leak", rqrule_files, 0)
+-- Client global.json present -> available
+local json_sb = { route = { rules = {}, default_outbound = "0.direct", final = "direct" } }
+local env7 = make_env({}, "", nil, json_sb)
+local r7 = M.query({ target = "1.2.3.4", port = "", proto = "tcp" }, env7)
+chk("client available", r7.client.available, true)
+chk("client core", r7.client.core, "sing-box")
 
-print(string.format("query-test: %d passed, %d failed", pass, fail))
+-- Client global.json absent -> not available
+local env8 = make_env({}, "", nil, nil)
+local r8 = M.query({ target = "1.2.3.4", port = "", proto = "tcp" }, env8)
+chk("client not available", r8.client.available, false)
+
+-- ACL with src -> acl block present
+local r9 = M.query({ target = "1.2.3.4", port = "", proto = "tcp", src = "192.168.1.5" }, env1)
+chk("acl present", r9.acl ~= nil, true)
+chk("acl matched", r9.acl.matched, true)
+
+print(string.format("flow-test: %d passed, %d failed", pass, fail))
 return { pass = pass, fail = fail }
