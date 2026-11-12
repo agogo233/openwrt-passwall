@@ -4,6 +4,10 @@ on:
   push:
 
 
+permissions:
+  contents: read
+  actions: write
+
 jobs:
   build:
     name: Build ${{ matrix.arch }}-${{ matrix.sdk }}
@@ -17,6 +21,13 @@ jobs:
           - openwrt-24.10
 
     steps:
+      - name: Delete old workflow runs
+        uses: Mattraks/delete-workflow-runs@v2
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          retain_days: 7
+          keep_minimum_runs: 3
       - name: Checkout
         uses: actions/checkout@v4
         with:
@@ -37,5 +48,6 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v6
         with:
+          retention-days: 7
           name: ${{ matrix.arch }}-${{ matrix.sdk }}
           path: bin/packages/${{ matrix.arch }}/passwall_packages/*.ipk
