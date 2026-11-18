@@ -44,7 +44,7 @@ test_proxy() {
 	echo $result
 }
 
-node_probe() {
+node_probe() (
 	local result=0
 	local node_id=$1
 	local probe_url=$2
@@ -67,14 +67,26 @@ node_probe() {
 			_username=$(config_n_get "$node_id" username)
 			_password=$(config_n_get "$node_id" password)
 		else
+			# 与其他临时节点测试互斥分配端口和启动代理，避免端口尚未监听时被重复选中。
+			exec 8>"${LOCK_PATH}/${CONFIG}_socks_auto_switch_test.lock"
+			flock -x 8 || { echo 0; return 1; }
 			_tmp_port=$(get_new_port $((48900 + $$ % 201)) tcp,udp) || { echo 0; return 1; }
-			NO_REC_PROCESS=1 /usr/share/${CONFIG}/app.sh run_socks flag="$test_flag" node="$node_id" bind=127.0.0.1 socks_port="$_tmp_port" config_file="${test_flag}.json"
+			NO_REC_PROCESS=1 /usr/share/${CONFIG}/app.sh run_socks flag="$test_flag" node="$node_id" bind=127.0.0.1 socks_port="$_tmp_port" config_file="${test_flag}.json" 8>&-
 			curlx="socks5h://127.0.0.1:${_tmp_port}"
 		fi
-		sleep 2s
+		sleep 2s 8>&-
+		# 监听就绪后释放启动锁，后续测试会通过端口占用检查避开当前端口。
+		# 尚未监听或启动失败时，持锁到本次测试清理结束。
+		if [ "$_type" != "socks" ] && [ "$(check_port_exists "$_tmp_port" tcp)" -gt 0 ]; then
+			flock -u 8
+			exec 8>&-
+		fi
+		# 预热代理链路，减轻首次请求的冷启动影响，提高部分节点的测试成功率和延迟稳定性
 		if [ "${_type}" == "socks" ] && [ -n "${_username}" ] && [ -n "${_password}" ]; then
+			curl --connect-timeout 3 --max-time 5 -o /dev/null -I -sk --proxy-user "${_username}:${_password}" -x "$curlx" "$probe_url" >/dev/null 2>&1
 			result=$(curl --connect-timeout 3 -o /dev/null -sk --proxy-user "${_username}:${_password}" -x "$curlx" "$@" "${probe_url}") || result=0
 		else
+			curl --connect-timeout 3 --max-time 5 -o /dev/null -I -sk -x "$curlx" "$probe_url" >/dev/null 2>&1
 			result=$(curl --connect-timeout 3 -o /dev/null -sk -x "$curlx" "$@" "${probe_url}") || result=0
 		fi
 		# 结束 SS 插件进程
@@ -86,7 +98,7 @@ node_probe() {
 		fi
 	}
 	printf '%s' "$result"
-}
+)
 
 url_test_node() {
 	local node_id=$1
