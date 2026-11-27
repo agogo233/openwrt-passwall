@@ -83,11 +83,11 @@ node_probe() (
 		fi
 		# 预热代理链路，减轻首次请求的冷启动影响，提高部分节点的测试成功率和延迟稳定性
 		if [ "${_type}" == "socks" ] && [ -n "${_username}" ] && [ -n "${_password}" ]; then
-			curl --connect-timeout 3 --max-time 5 -o /dev/null -I -sk --proxy-user "${_username}:${_password}" -x "$curlx" "$probe_url" >/dev/null 2>&1
-			result=$(curl --connect-timeout 3 -o /dev/null -sk --proxy-user "${_username}:${_password}" -x "$curlx" "$@" "${probe_url}") || result=0
+			curl --connect-timeout 3 --max-time 5 -o /dev/null -I -sk -A 'Mozilla/5.0' --proxy-user "${_username}:${_password}" -x "$curlx" "$probe_url" >/dev/null 2>&1
+			result=$(curl --connect-timeout 3 -o /dev/null -sk -A 'Mozilla/5.0' --proxy-user "${_username}:${_password}" -x "$curlx" "$@" "${probe_url}") || result=0
 		else
-			curl --connect-timeout 3 --max-time 5 -o /dev/null -I -sk -x "$curlx" "$probe_url" >/dev/null 2>&1
-			result=$(curl --connect-timeout 3 -o /dev/null -sk -x "$curlx" "$@" "${probe_url}") || result=0
+			curl --connect-timeout 3 --max-time 5 -o /dev/null -I -sk -A 'Mozilla/5.0' -x "$curlx" "$probe_url" >/dev/null 2>&1
+			result=$(curl --connect-timeout 3 -o /dev/null -sk -A 'Mozilla/5.0' -x "$curlx" "$@" "${probe_url}") || result=0
 		fi
 		# 结束 SS 插件进程
 		if [ "$_type" != "socks" ]; then
